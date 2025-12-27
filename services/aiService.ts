@@ -8,7 +8,7 @@ export interface AIServiceProvider {
 class GLMProvider implements AIServiceProvider {
   private apiKey: string;
   private modelName = 'glm-4.5-flash';
-  private requestTimeoutMs = 15000;
+  private requestTimeoutMs = 30000;
 
   constructor() {
     // Determine the API key safely
@@ -50,7 +50,14 @@ class GLMProvider implements AIServiceProvider {
           throw new Error(`GLM request failed: ${response.status} ${errorBody}`);
         }
 
-        return response.json();
+        const data = await response.json();
+        if (data?.error) {
+          throw new Error(`GLM response error: ${JSON.stringify(data.error)}`);
+        }
+        if (!data?.choices?.length) {
+          throw new Error('GLM response missing choices.');
+        }
+        return data;
       } catch (error) {
         const isAbortError = error instanceof Error && error.name === 'AbortError';
         if ((isAbortError || error instanceof TypeError) && attempt < 2) {
@@ -64,6 +71,46 @@ class GLMProvider implements AIServiceProvider {
     }
 
     throw new Error('GLM request failed after retries.');
+  }
+
+  private extractAffirmations(text: string): string[] {
+    const trimmed = text.trim();
+    if (!trimmed) return [];
+
+    try {
+      const data = JSON.parse(trimmed);
+      if (Array.isArray(data)) {
+        return data.map(item => String(item).trim()).filter(Boolean).slice(0, 7);
+      }
+      if (Array.isArray(data?.affirmations)) {
+        return data.affirmations.map(item => String(item).trim()).filter(Boolean).slice(0, 7);
+      }
+    } catch (parseError) {
+      const jsonMatch = trimmed.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
+      if (jsonMatch) {
+        try {
+          const data = JSON.parse(jsonMatch[0]);
+          if (Array.isArray(data)) {
+            return data.map(item => String(item).trim()).filter(Boolean).slice(0, 7);
+          }
+          if (Array.isArray(data?.affirmations)) {
+            return data.affirmations.map(item => String(item).trim()).filter(Boolean).slice(0, 7);
+          }
+        } catch (innerError) {
+          console.warn('Affirmation JSON parse failed:', innerError);
+        }
+      }
+    }
+
+    const listFromLines = trimmed
+      .split(/\r?\n/)
+      .map(item => item.replace(/^[\d\-、.。)\s]+/, '').trim())
+      .filter(Boolean)
+      .slice(0, 7);
+
+    if (listFromLines.length > 0) return listFromLines;
+
+    return [trimmed];
   }
 
   async generateUniverseLetter(input: string): Promise<string> {
@@ -99,32 +146,8 @@ class GLMProvider implements AIServiceProvider {
       ]);
       const text = response.choices?.[0]?.message?.content;
       if (!text) return ["我已拥有完美的丰盛"];
-      try {
-        const data = JSON.parse(text);
-        if (Array.isArray(data.affirmations)) {
-          return data.affirmations;
-        }
-      } catch (parseError) {
-        const jsonMatch = text.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          try {
-            const data = JSON.parse(jsonMatch[0]);
-            if (Array.isArray(data.affirmations)) {
-              return data.affirmations;
-            }
-          } catch (innerError) {
-            console.warn('Affirmation JSON parse failed:', innerError);
-          }
-        }
-      }
-
-      const fallbackList = text
-        .split(/\r?\n/)
-        .map(item => item.replace(/^[\d\-、.。)\s]+/, '').trim())
-        .filter(Boolean)
-        .slice(0, 7);
-
-      return fallbackList.length > 0 ? fallbackList : ["我已拥有完美的丰盛"];
+      const affirmations = this.extractAffirmations(text);
+      return affirmations.length > 0 ? affirmations : ["我已拥有完美的丰盛"];
     } catch (e) {
       console.error('Affirmation generation failed:', e);
       return ["我已拥有完美的丰盛", "一切奇迹都在此时发生"];
