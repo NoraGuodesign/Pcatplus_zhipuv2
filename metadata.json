@@ -1,0 +1,8 @@
+{
+  "name": "Braun Inner Harmony",
+  "description": "A serene personal growth application following Braun design principles, featuring gratitude journaling, AI-powered affirmations, and mindful practice modules.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
